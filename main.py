@@ -1,13 +1,12 @@
 import streamlit as st
-import numpy as np
 
 # 初期設定
 BOARD_SIZE = 8  # 碁盤のサイズ
 player_pos = [3, 3]  # 自分のコマの初期位置
-enemy_positions = [[1, 1], [2, 5], [6, 6]]  # 敵のコマの初期位置
+enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 敵のコマの初期位置
 
 # Streamlitアプリ
-st.title("ドラッグ＆ドロップ対応ボードゲームシミュレータ")
+st.title("ボードゲームシミュレータ")
 
 # セッション状態を保持
 if "player_pos" not in st.session_state:
@@ -45,7 +44,9 @@ html_code = f"""
     font-weight: bold;
     cursor: pointer;
   }}
-  .cell:nth-child(odd) {{ background-color: #b58863; }}
+  .highlight {{
+    background-color: #ffcccc;
+  }}
   .draggable {{
     width: 100%;
     height: 100%;
@@ -62,23 +63,39 @@ html_code = f"""
 for x in range(BOARD_SIZE):
     for y in range(BOARD_SIZE):
         cell_id = f"cell-{x}-{y}"
+        content = ""
+        highlight_class = ""
+
+        # ハイライト（E1の上下左右、E2の斜め）
+        if [x, y] in st.session_state.enemy_positions["E1"]:
+            highlight_positions = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
+        elif [x, y] in st.session_state.enemy_positions["E2"]:
+            highlight_positions = [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
+        else:
+            highlight_positions = []
+
+        if [x, y] in highlight_positions:
+            highlight_class = "highlight"
+
+        # 駒を配置
         if [x, y] == st.session_state.player_pos:
             content = '<div class="draggable" draggable="true" id="player">P</div>'
-        elif [x, y] in st.session_state.enemy_positions:
-            enemy_index = st.session_state.enemy_positions.index([x, y])
-            content = f'<div class="draggable" draggable="true" id="enemy-{enemy_index}" style="color: red;">E</div>'
-        else:
-            content = ""
-        html_code += f'<div class="cell" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
+        elif [x, y] in st.session_state.enemy_positions["E1"]:
+            content = '<div class="draggable" draggable="true" id="enemy-E1" style="color: red;">E1</div>'
+        elif [x, y] in st.session_state.enemy_positions["E2"]:
+            content = '<div class="draggable" draggable="true" id="enemy-E2" style="color: blue;">E2</div>'
+
+        html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
 
 html_code += """
   </div>
   <div class="enemy-pool">
 """
 
-# 敵のコマ置き場を作成
-for i in range(5):  # 最大5個の敵コマを置き場に表示
-    html_code += f'<div class="cell" id="pool-{i}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-enemy-{i}" style="color: red;">E</div></div>'
+# 敵の駒置き場を作成
+for i in range(2):  # E1とE2の駒置き場
+    enemy_type = f"E{i+1}"
+    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {"red" if enemy_type == "E1" else "blue"};">{enemy_type}</div></div>'
 
 html_code += """
   </div>
@@ -109,11 +126,11 @@ html_code += """
     if (data.startsWith("player")) {
       Streamlit.setComponentValue({ type: "player", position });
     } else if (data.startsWith("enemy")) {
-      const enemyIndex = parseInt(data.split('-')[1]);
-      Streamlit.setComponentValue({ type: "enemy", index: enemyIndex, position });
-    } else if (data.startsWith("pool-enemy")) {
-      const poolIndex = parseInt(data.split('-')[2]);
-      Streamlit.setComponentValue({ type: "new_enemy", poolIndex, position });
+      const enemyType = data.split('-')[1];
+      Streamlit.setComponentValue({ type: "enemy", enemyType, position });
+    } else if (data.startsWith("pool")) {
+      const enemyType = data.split('-')[1];
+      Streamlit.setComponentValue({ type: "new_enemy", enemyType, position });
     }
   }
 
@@ -130,12 +147,9 @@ result = st.components.v1.html(html_code, height=BOARD_SIZE * 52 + 100, scrollin
 if result is not None and isinstance(result, dict):
     if result.get("type") == "player" and result.get("position"):
         st.session_state.player_pos = result["position"]
-        st.success(f"自分のコマを移動しました: {result['position']}")
     elif result.get("type") == "enemy" and result.get("position"):
-        st.session_state.enemy_positions[result["index"]] = result["position"]
-        st.success(f"敵のコマを移動しました: {result['position']}")
+        enemy_type = result["enemyType"]
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
     elif result.get("type") == "new_enemy" and result.get("position"):
-        st.session_state.enemy_positions.append(result["position"])
-        st.success(f"敵のコマを新たに配置しました: {result['position']}")
-else:
-    st.info("コマを動かしてみてください。")
+        enemy_type = result["enemyType"]
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
