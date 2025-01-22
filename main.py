@@ -127,13 +127,15 @@ html_code += """
 result = st.components.v1.html(html_code, height=BOARD_SIZE * 52 + 100, scrolling=False)
 
 # 新しい位置を受け取ったら更新
-if result:
-    if result["type"] == "player" and result["position"]:
+if result is not None and isinstance(result, dict):
+    if result.get("type") == "player" and result.get("position"):
         st.session_state.player_pos = result["position"]
         st.success(f"自分のコマを移動しました: {result['position']}")
-    elif result["type"] == "enemy" and result["position"]:
+    elif result.get("type") == "enemy" and result.get("position"):
         st.session_state.enemy_positions[result["index"]] = result["position"]
         st.success(f"敵のコマを移動しました: {result['position']}")
-    elif result["type"] == "new_enemy" and result["position"]:
+    elif result.get("type") == "new_enemy" and result.get("position"):
         st.session_state.enemy_positions.append(result["position"])
         st.success(f"敵のコマを新たに配置しました: {result['position']}")
+else:
+    st.info("コマを動かしてみてください。")
