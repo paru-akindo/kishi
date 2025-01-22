@@ -5,9 +5,6 @@ BOARD_SIZE = 8  # 碁盤のサイズ
 player_pos = [3, 3]  # 自分のコマの初期位置
 initial_enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 敵のコマの初期位置
 
-# Streamlitアプリ
-st.title("ボードゲームシミュレータ")
-
 # セッション状態を保持
 if "player_pos" not in st.session_state:
     st.session_state.player_pos = player_pos
@@ -59,25 +56,22 @@ html_code = f"""
   <div class="board">
 """
 
+# ハイライト範囲を計算
+highlight_positions = []
+for enemy_type, positions in st.session_state.enemy_positions.items():
+    for pos in positions:
+        x, y = pos
+        if enemy_type == "E1":
+            highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
+        elif enemy_type == "E2":
+            highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
+
 # 盤面を作成し、自分のコマと敵のコマを配置
 for x in range(BOARD_SIZE):
     for y in range(BOARD_SIZE):
         cell_id = f"cell-{x}-{y}"
         content = ""
-        highlight_class = ""
-
-        # ハイライト（E1の上下左右、E2の斜め）
-        highlight_positions = []
-        for enemy_type, positions in st.session_state.enemy_positions.items():
-            for pos in positions:
-                if pos == [x, y]:
-                    if enemy_type == "E1":
-                        highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
-                    elif enemy_type == "E2":
-                        highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
-
-        if [x, y] in highlight_positions:
-            highlight_class = "highlight"
+        highlight_class = "highlight" if [x, y] in highlight_positions else ""
 
         # 駒を配置
         if [x, y] == st.session_state.player_pos:
