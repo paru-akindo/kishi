@@ -11,6 +11,20 @@ if "player_pos" not in st.session_state:
 if "enemy_positions" not in st.session_state:
     st.session_state.enemy_positions = initial_enemy_positions
 
+# ハイライト範囲を動的に計算する関数
+def calculate_highlight_positions():
+    highlight_positions = []
+    for enemy_type, positions in st.session_state.enemy_positions.items():
+        for pos in positions:
+            x, y = pos
+            if enemy_type == "E1":
+                highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
+            elif enemy_type == "E2":
+                highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
+    return highlight_positions
+
+highlight_positions = calculate_highlight_positions()
+
 # HTMLとCSSで盤面と敵の駒置き場を作成
 html_code = f"""
 <style>
@@ -56,16 +70,6 @@ html_code = f"""
   <div class="board">
 """
 
-# ハイライト範囲を計算
-highlight_positions = []
-for enemy_type, positions in st.session_state.enemy_positions.items():
-    for pos in positions:
-        x, y = pos
-        if enemy_type == "E1":
-            highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
-        elif enemy_type == "E2":
-            highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
-
 # 盤面を作成し、自分のコマと敵のコマを配置
 for x in range(BOARD_SIZE):
     for y in range(BOARD_SIZE):
@@ -88,7 +92,7 @@ html_code += """
   <div class="enemy-pool">
 """
 
-# 敵の駒置き場を作成
+# 敵の駒置き場を作成（駒が消えないようにする）
 for i in range(2):  # E1とE2の駒置き場
     enemy_type = f"E{i+1}"
     html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {"red" if enemy_type == "E1" else "blue"};">{enemy_type}</div></div>'
@@ -124,9 +128,6 @@ html_code += """
     } else if (data.startsWith("enemy")) {
       const enemyType = data.split('-')[1];
       Streamlit.setComponentValue({ type: "enemy", enemyType, position });
-    } else if (data.startsWith("pool")) {
-      const enemyType = data.split('-')[1];
-      Streamlit.setComponentValue({ type: "new_enemy", enemyType, position });
     }
   }
 
@@ -146,6 +147,4 @@ if result is not None and isinstance(result, dict):
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
         st.session_state.enemy_positions[enemy_type].append(result["position"])
-    elif result.get("type") == "new_enemy" and result.get("position"):
-        enemy_type = result["enemyType"]
-        st.session_state.enemy_positions[enemy_type].append(result["position"])
+    highlight_positions = calculate_highlight_positions()  # ハイライトを再計算
