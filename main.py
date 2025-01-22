@@ -10,8 +10,10 @@ if "player_pos" not in st.session_state:
     st.session_state.player_pos = player_pos
 if "enemy_positions" not in st.session_state:
     st.session_state.enemy_positions = initial_enemy_positions
+if "highlight_positions" not in st.session_state:
+    st.session_state.highlight_positions = []
 
-# ハイライト範囲を動的に計算する関数
+# ハイライト範囲を計算する関数
 def calculate_highlight_positions():
     highlight_positions = []
     for enemy_type, positions in st.session_state.enemy_positions.items():
@@ -23,7 +25,9 @@ def calculate_highlight_positions():
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
     return highlight_positions
 
-highlight_positions = calculate_highlight_positions()
+# ボタンが押されたときにハイライトを更新
+if st.button("敵の行動範囲をハイライト"):
+    st.session_state.highlight_positions = calculate_highlight_positions()
 
 # HTMLとCSSで盤面と敵の駒置き場を作成
 html_code = f"""
@@ -75,7 +79,7 @@ for x in range(BOARD_SIZE):
     for y in range(BOARD_SIZE):
         cell_id = f"cell-{x}-{y}"
         content = ""
-        highlight_class = "highlight" if [x, y] in highlight_positions else ""
+        highlight_class = "highlight" if [x, y] in st.session_state.highlight_positions else ""
 
         # 駒を配置
         if [x, y] == st.session_state.player_pos:
@@ -147,4 +151,3 @@ if result is not None and isinstance(result, dict):
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
         st.session_state.enemy_positions[enemy_type].append(result["position"])
-    highlight_positions = calculate_highlight_positions()  # ハイライトを再計算
