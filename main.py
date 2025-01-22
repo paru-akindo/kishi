@@ -23,7 +23,7 @@ def calculate_highlight_positions():
                 highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
             elif enemy_type == "E2":
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
-    return highlight_positions
+    return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
 
 # ボタンが押されたときにハイライトを更新
 if st.button("敵の行動範囲をハイライト"):
@@ -150,4 +150,5 @@ if result is not None and isinstance(result, dict):
         st.session_state.player_pos = result["position"]
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
-        st.session_state.enemy_positions[enemy_type].append(result["position"])
+        if result["position"] not in st.session_state.enemy_positions[enemy_type]:
+            st.session_state.enemy_positions[enemy_type].append(result["position"])
