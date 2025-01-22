@@ -82,4 +82,76 @@ for x in range(BOARD_SIZE):
         # 駒を配置
         if [x, y] == st.session_state.player_pos:
             content = '<div class="draggable" draggable="true" id="player">P</div>'
-        elif [x, y] in st.session_stat
+        elif [x, y] in st.session_state.enemy_positions["E1"]:
+            content = '<div class="draggable" draggable="true" id="enemy-E1" style="color: red;">E1</div>'
+        elif [x, y] in st.session_state.enemy_positions["E2"]:
+            content = '<div class="draggable" draggable="true" id="enemy-E2" style="color: blue;">E2</div>'
+
+        html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
+
+html_code += """
+  </div>
+  <div class="enemy-pool">
+"""
+
+# 敵の駒置き場を作成
+for i in range(2):  # E1とE2の駒置き場
+    enemy_type = f"E{i+1}"
+    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {"red" if enemy_type == "E1" else "blue"};">{enemy_type}</div></div>'
+
+html_code += """
+  </div>
+</div>
+"""
+
+# JavaScriptでドラッグ＆ドロップを制御
+html_code += """
+<script>
+  function allowDrop(ev) {
+    ev.preventDefault();
+  }
+
+  function drag(ev) {
+    ev.dataTransfer.setData("text", ev.target.id);
+  }
+
+  function drop(ev) {
+    ev.preventDefault();
+    var data = ev.dataTransfer.getData("text");
+    var draggedElement = document.getElementById(data);
+    ev.target.appendChild(draggedElement);
+
+    // Send the new position to Streamlit
+    const cellId = ev.target.id;
+    const position = cellId.includes("cell") ? cellId.split('-').slice(1).map(Number) : null;
+
+    if (data.startsWith("player")) {
+      Streamlit.setComponentValue({ type: "player", position });
+    } else if (data.startsWith("enemy")) {
+      const enemyType = data.split('-')[1];
+      Streamlit.setComponentValue({ type: "enemy", enemyType, position });
+    } else if (data.startsWith("pool")) {
+      const enemyType = data.split('-')[1];
+      Streamlit.setComponentValue({ type: "new_enemy", enemyType, position });
+    }
+  }
+
+  document.querySelectorAll('.draggable').forEach(el => {
+    el.setAttribute('ondragstart', 'drag(event)');
+  });
+</script>
+"""
+
+# StreamlitにHTMLを埋め込む
+result = st.components.v1.html(html_code, height=BOARD_SIZE * 52 + 100, scrolling=False)
+
+# 新しい位置を受け取ったら更新
+if result is not None and isinstance(result, dict):
+    if result.get("type") == "player" and result.get("position"):
+        st.session_state.player_pos = result["position"]
+    elif result.get("type") == "enemy" and result.get("position"):
+        enemy_type = result["enemyType"]
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
+    elif result.get("type") == "new_enemy" and result.get("position"):
+        enemy_type = result["enemyType"]
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
