@@ -9,7 +9,7 @@ initial_enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 敵のコマの初
 if "player_pos" not in st.session_state:
     st.session_state.player_pos = player_pos
 if "enemy_positions" not in st.session_state:
-    st.session_state.enemy_positions = initial_enemy_positions
+    st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 変更しない初期値
 if "highlight_positions" not in st.session_state:
     st.session_state.highlight_positions = []
 
@@ -25,16 +25,14 @@ def calculate_highlight_positions():
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
     return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
 
-# ボタンが押されたときにハイライトを更新
+# ボタンが押されたときにハイライトを更新（駒の位置は保持）
 if st.button("敵の行動範囲をハイライト"):
     st.session_state.highlight_positions = calculate_highlight_positions()
 
-# HTMLとCSSで盤面と敵の駒置き場を作成
+# 盤面のHTMLを作成
 html_code = f"""
 <style>
-  .container {{
-    display: flex;
-  }}
+  .container {{ display: flex; }}
   .board {{
     display: grid;
     grid-template-columns: repeat({BOARD_SIZE}, 50px);
@@ -43,51 +41,37 @@ html_code = f"""
     background-color: black;
     margin-right: 20px;
   }}
-  .enemy-pool {{
-    display: grid;
-    grid-template-columns: repeat(2, 50px);
-    gap: 1px;
-  }}
+  .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; }}
   .cell {{
     width: 50px;
     height: 50px;
     background-color: #f0d9b5;
-    position: relative;
     text-align: center;
     line-height: 50px;
     font-size: 24px;
     font-weight: bold;
     cursor: pointer;
   }}
-  .highlight {{
-    background-color: #ffcccc;
-  }}
-  .draggable {{
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }}
+  .highlight {{ background-color: #ffcccc; }}
+  .draggable {{ display: flex; align-items: center; justify-content: center; }}
 </style>
 <div class="container">
   <div class="board">
 """
 
-# 盤面を作成し、自分のコマと敵のコマを配置
+# 盤面作成
 for x in range(BOARD_SIZE):
     for y in range(BOARD_SIZE):
         cell_id = f"cell-{x}-{y}"
         content = ""
         highlight_class = "highlight" if [x, y] in st.session_state.highlight_positions else ""
 
-        # 駒を配置
         if [x, y] == st.session_state.player_pos:
             content = '<div class="draggable" draggable="true" id="player">P</div>'
-        elif [x, y] in st.session_state.enemy_positions["E1"]:
-            content = '<div class="draggable" draggable="true" id="enemy-E1" style="color: red;">E1</div>'
-        elif [x, y] in st.session_state.enemy_positions["E2"]:
-            content = '<div class="draggable" draggable="true" id="enemy-E2" style="color: blue;">E2</div>'
+        for enemy_type in ["E1", "E2"]:
+            if [x, y] in st.session_state.enemy_positions[enemy_type]:
+                color = "red" if enemy_type == "E1" else "blue"
+                content = f'<div class="draggable" draggable="true" id="enemy-{enemy_type}" style="color: {color};">{enemy_type}</div>'
 
         html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
 
@@ -96,10 +80,10 @@ html_code += """
   <div class="enemy-pool">
 """
 
-# 敵の駒置き場を作成（駒が消えないようにする）
-for i in range(2):  # E1とE2の駒置き場
-    enemy_type = f"E{i+1}"
-    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {"red" if enemy_type == "E1" else "blue"};">{enemy_type}</div></div>'
+# 敵の駒置き場（常に駒が残る）
+for enemy_type in ["E1", "E2"]:
+    color = "red" if enemy_type == "E1" else "blue"
+    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {color};">{enemy_type}</div></div>'
 
 html_code += """
   </div>
@@ -109,24 +93,19 @@ html_code += """
 # JavaScriptでドラッグ＆ドロップを制御
 html_code += """
 <script>
-  function allowDrop(ev) {
-    ev.preventDefault();
-  }
-
-  function drag(ev) {
-    ev.dataTransfer.setData("text", ev.target.id);
-  }
-
+  function allowDrop(ev) { ev.preventDefault(); }
+  function drag(ev) { ev.dataTransfer.setData("text", ev.target.id); }
   function drop(ev) {
     ev.preventDefault();
     var data = ev.dataTransfer.getData("text");
     var draggedElement = document.getElementById(data);
-    ev.target.appendChild(draggedElement);
-
-    // Send the new position to Streamlit
+    if (!draggedElement) return;
+    
     const cellId = ev.target.id;
-    const position = cellId.includes("cell") ? cellId.split('-').slice(1).map(Number) : null;
+    if (!cellId.startsWith("cell")) return;
+    ev.target.appendChild(draggedElement.cloneNode(true));
 
+    const position = cellId.split('-').slice(1).map(Number);
     if (data.startsWith("player")) {
       Streamlit.setComponentValue({ type: "player", position });
     } else if (data.startsWith("enemy")) {
