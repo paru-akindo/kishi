@@ -25,10 +25,9 @@ def calculate_highlight_positions():
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
     return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
 
-# ボタンが押されたときにハイライトを更新（駒の位置は保持）
+# ボタンが押されたときにハイライトを更新（駒の位置を保持）
 if st.button("敵の行動範囲をハイライト"):
     st.session_state.highlight_positions = calculate_highlight_positions()
-    st.rerun()
 
 # 盤面のHTMLを作成
 html_code = f"""
@@ -72,7 +71,7 @@ for x in range(BOARD_SIZE):
         for enemy_type in ["E1", "E2"]:
             if [x, y] in st.session_state.enemy_positions[enemy_type]:
                 color = "red" if enemy_type == "E1" else "blue"
-                content = f'<div class="draggable" draggable="true" id="enemy-{enemy_type}" style="color: {color};">{enemy_type}</div>'
+                content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
 
         html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
 
@@ -105,19 +104,15 @@ html_code += """
     const cellId = ev.target.id;
     if (!cellId.startsWith("cell")) return;
     
-    let parent = draggedElement.parentNode;
-    if (parent && parent.classList.contains("cell")) {
-      parent.innerHTML = "";
-    }
-    
     ev.target.innerHTML = "";
     ev.target.appendChild(draggedElement);
 
     const position = cellId.split('-').slice(1).map(Number);
-    if (data.startsWith("player")) {
+    if (data === "player") {
       Streamlit.setComponentValue({ type: "player", position });
     } else if (data.startsWith("enemy")) {
-      const enemyType = data.split('-')[1];
+      const parts = data.split('-');
+      const enemyType = parts[3];
       Streamlit.setComponentValue({ type: "enemy", enemyType, position });
     }
   }
@@ -137,6 +132,6 @@ if result is not None and isinstance(result, dict):
         st.session_state.player_pos = result["position"]
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
-        st.session_state.enemy_positions[enemy_type] = [pos for pos in st.session_state.enemy_positions[enemy_type] if pos != result["position"]]  # 以前の位置を削除
-        st.session_state.enemy_positions[enemy_type].append(result["position"])
+        st.session_state.enemy_positions[enemy_type] = [result["position"]]
+    st.session_state.highlight_positions = calculate_highlight_positions()
     st.rerun()
