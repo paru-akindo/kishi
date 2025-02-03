@@ -75,21 +75,38 @@ def render_board(player_pos, enemy_positions, highlight_positions, include_enemy
             highlight_class = "highlight" if [x, y] in highlight_positions else ""
 
             if [x, y] == player_pos:
-                content = '<div class="draggable" draggable="true" id="player">P</div>'
+                content = f'<div class="draggable" draggable="true" id="player" ondragstart="drag(event)">P</div>'
             for enemy_type in ["E1", "E2"]:
                 if [x, y] in enemy_positions[enemy_type]:
                     color = "red" if enemy_type == "E1" else "blue"
-                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
+                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" ondragstart="drag(event)" style="color: {color};">{enemy_type}</div>'
 
-            html_code += f'<div class="cell {highlight_class}" id="{cell_id}">{content}</div>'
+            html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
 
     html_code += "</div>"
     
     if include_enemy_pool:
         html_code += "<div class='enemy-pool'>"
         for enemy_type, label in enemy_pool.items():
-            html_code += f'<div class="cell"><div class="draggable" draggable="true" id="enemy-{enemy_type}">{label}</div></div>'
+            html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="enemy-{enemy_type}" ondragstart="drag(event)">{label}</div></div>'
         html_code += "</div>"
+    
+    html_code += """
+    <script>
+    function allowDrop(ev) {{
+      ev.preventDefault();
+    }}
+    function drag(ev) {{
+      ev.dataTransfer.setData("text", ev.target.id);
+    }}
+    function drop(ev) {{
+      ev.preventDefault();
+      var data = ev.dataTransfer.getData("text");
+      var draggedElement = document.getElementById(data);
+      ev.target.appendChild(draggedElement);
+    }}
+    </script>
+    """
     
     return html_code
 
