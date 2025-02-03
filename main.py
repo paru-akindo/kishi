@@ -15,6 +15,9 @@ if "highlight_positions" not in st.session_state:
 if "saved_board" not in st.session_state:
     st.session_state.saved_board = {}
 
+# 駒置き場の定義
+enemy_pool = {"E1": "E1", "E2": "E2"}
+
 # ハイライト範囲を計算する関数
 def calculate_highlight_positions(enemy_positions):
     highlight_positions = []
@@ -36,7 +39,7 @@ if st.button("敵の行動範囲をハイライト"):
     st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.saved_board["enemy_positions"])
 
 # 盤面を描画する関数
-def render_board(player_pos, enemy_positions, highlight_positions):
+def render_board(player_pos, enemy_positions, highlight_positions, include_enemy_pool=True):
     html_code = f"""
     <style>
       .container {{ display: flex; flex-direction: column; gap: 20px; }}
@@ -78,13 +81,20 @@ def render_board(player_pos, enemy_positions, highlight_positions):
                     color = "red" if enemy_type == "E1" else "blue"
                     content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
 
-            html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
+            html_code += f'<div class="cell {highlight_class}" id="{cell_id}">{content}</div>'
 
     html_code += "</div>"
+    
+    if include_enemy_pool:
+        html_code += "<div class='enemy-pool'>"
+        for enemy_type, label in enemy_pool.items():
+            html_code += f'<div class="cell"><div class="draggable" draggable="true" id="enemy-{enemy_type}">{label}</div></div>'
+        html_code += "</div>"
+    
     return html_code
 
-st.components.v1.html(render_board(st.session_state.player_pos, st.session_state.enemy_positions, []), height=BOARD_SIZE * 52 + 100, scrolling=False)
+st.components.v1.html(render_board(st.session_state.player_pos, st.session_state.enemy_positions, [], include_enemy_pool=True), height=BOARD_SIZE * 52 + 150, scrolling=False)
 
 if st.session_state.saved_board:
     st.write("### 敵の行動範囲ハイライト")
-    st.components.v1.html(render_board(st.session_state.saved_board["player_pos"], st.session_state.saved_board["enemy_positions"], st.session_state.highlight_positions), height=BOARD_SIZE * 52 + 100, scrolling=False)
+    st.components.v1.html(render_board(st.session_state.saved_board["player_pos"], st.session_state.saved_board["enemy_positions"], st.session_state.highlight_positions, include_enemy_pool=False), height=BOARD_SIZE * 52 + 100, scrolling=False)
