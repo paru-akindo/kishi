@@ -28,6 +28,7 @@ def calculate_highlight_positions():
 # ボタンが押されたときにハイライトを更新（駒の位置は保持）
 if st.button("敵の行動範囲をハイライト"):
     st.session_state.highlight_positions = calculate_highlight_positions()
+    st.rerun()
 
 # 盤面のHTMLを作成
 html_code = f"""
@@ -103,7 +104,14 @@ html_code += """
     
     const cellId = ev.target.id;
     if (!cellId.startsWith("cell")) return;
-    ev.target.appendChild(draggedElement.cloneNode(true));
+    
+    let parent = draggedElement.parentNode;
+    if (parent && parent.classList.contains("cell")) {
+      parent.innerHTML = "";
+    }
+    
+    ev.target.innerHTML = "";
+    ev.target.appendChild(draggedElement);
 
     const position = cellId.split('-').slice(1).map(Number);
     if (data.startsWith("player")) {
@@ -129,5 +137,6 @@ if result is not None and isinstance(result, dict):
         st.session_state.player_pos = result["position"]
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
-        if result["position"] not in st.session_state.enemy_positions[enemy_type]:
-            st.session_state.enemy_positions[enemy_type].append(result["position"])
+        st.session_state.enemy_positions[enemy_type] = [pos for pos in st.session_state.enemy_positions[enemy_type] if pos != result["position"]]  # 以前の位置を削除
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
+    st.rerun()
