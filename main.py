@@ -83,7 +83,7 @@ html_code += """
 # 敵の駒置き場（常に駒が残る）
 for enemy_type in ["E1", "E2"]:
     color = "red" if enemy_type == "E1" else "blue"
-    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="pool-{enemy_type}" style="color: {color};">{enemy_type}</div></div>'
+    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="clone-{enemy_type}" style="color: {color};">{enemy_type}</div></div>'
 
 html_code += """
   </div>
@@ -104,9 +104,16 @@ html_code += """
     const cellId = ev.target.id;
     if (!cellId.startsWith("cell")) return;
     
-    ev.target.innerHTML = "";
-    ev.target.appendChild(draggedElement);
-
+    if (data.startsWith("clone")) {
+      let newElement = draggedElement.cloneNode(true);
+      newElement.id = `enemy-${cellId.split('-')[1]}-${cellId.split('-')[2]}-${data.split('-')[1]}`;
+      ev.target.innerHTML = "";
+      ev.target.appendChild(newElement);
+    } else {
+      ev.target.innerHTML = "";
+      ev.target.appendChild(draggedElement);
+    }
+    
     const position = cellId.split('-').slice(1).map(Number);
     if (data === "player") {
       Streamlit.setComponentValue({ type: "player", position });
@@ -132,6 +139,6 @@ if result is not None and isinstance(result, dict):
         st.session_state.player_pos = result["position"]
     elif result.get("type") == "enemy" and result.get("position"):
         enemy_type = result["enemyType"]
-        st.session_state.enemy_positions[enemy_type] = [result["position"]]
+        st.session_state.enemy_positions[enemy_type].append(result["position"])
     st.session_state.highlight_positions = calculate_highlight_positions()
     st.rerun()
