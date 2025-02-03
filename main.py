@@ -12,11 +12,13 @@ if "enemy_positions" not in st.session_state:
     st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 変更しない初期値
 if "highlight_positions" not in st.session_state:
     st.session_state.highlight_positions = []
+if "saved_board" not in st.session_state:
+    st.session_state.saved_board = {}
 
 # ハイライト範囲を計算する関数
-def calculate_highlight_positions():
+def calculate_highlight_positions(enemy_positions):
     highlight_positions = []
-    for enemy_type, positions in st.session_state.enemy_positions.items():
+    for enemy_type, positions in enemy_positions.items():
         for pos in positions:
             x, y = pos
             if enemy_type == "E1":
@@ -25,120 +27,64 @@ def calculate_highlight_positions():
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
     return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
 
-# ボタンが押されたときにハイライトを更新（駒の位置を保持）
+# ボタンが押されたときに現在の盤面を保存し、ハイライトを計算
 if st.button("敵の行動範囲をハイライト"):
-    st.session_state.highlight_positions = calculate_highlight_positions()
-
-# 盤面のHTMLを作成
-html_code = f"""
-<style>
-  .container {{ display: flex; }}
-  .board {{
-    display: grid;
-    grid-template-columns: repeat({BOARD_SIZE}, 50px);
-    grid-template-rows: repeat({BOARD_SIZE}, 50px);
-    gap: 1px;
-    background-color: black;
-    margin-right: 20px;
-  }}
-  .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; }}
-  .cell {{
-    width: 50px;
-    height: 50px;
-    background-color: #f0d9b5;
-    text-align: center;
-    line-height: 50px;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-  }}
-  .highlight {{ background-color: #ffcccc; }}
-  .draggable {{ display: flex; align-items: center; justify-content: center; }}
-</style>
-<div class="container">
-  <div class="board">
-"""
-
-# 盤面作成
-for x in range(BOARD_SIZE):
-    for y in range(BOARD_SIZE):
-        cell_id = f"cell-{x}-{y}"
-        content = ""
-        highlight_class = "highlight" if [x, y] in st.session_state.highlight_positions else ""
-
-        if [x, y] == st.session_state.player_pos:
-            content = '<div class="draggable" draggable="true" id="player">P</div>'
-        for enemy_type in ["E1", "E2"]:
-            if [x, y] in st.session_state.enemy_positions[enemy_type]:
-                color = "red" if enemy_type == "E1" else "blue"
-                content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
-
-        html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
-
-html_code += """
-  </div>
-  <div class="enemy-pool">
-"""
-
-# 敵の駒置き場（常に駒が残る）
-for enemy_type in ["E1", "E2"]:
-    color = "red" if enemy_type == "E1" else "blue"
-    html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="clone-{enemy_type}" style="color: {color};">{enemy_type}</div></div>'
-
-html_code += """
-  </div>
-</div>
-"""
-
-# JavaScriptでドラッグ＆ドロップを制御
-html_code += """
-<script>
-  function allowDrop(ev) { ev.preventDefault(); }
-  function drag(ev) { ev.dataTransfer.setData("text", ev.target.id); }
-  function drop(ev) {
-    ev.preventDefault();
-    var data = ev.dataTransfer.getData("text");
-    var draggedElement = document.getElementById(data);
-    if (!draggedElement) return;
-    
-    const cellId = ev.target.id;
-    if (!cellId.startsWith("cell")) return;
-    
-    if (data.startsWith("clone")) {
-      let newElement = draggedElement.cloneNode(true);
-      newElement.id = `enemy-${cellId.split('-')[1]}-${cellId.split('-')[2]}-${data.split('-')[1]}`;
-      ev.target.innerHTML = "";
-      ev.target.appendChild(newElement);
-    } else {
-      ev.target.innerHTML = "";
-      ev.target.appendChild(draggedElement);
+    st.session_state.saved_board = {
+        "player_pos": st.session_state.player_pos,
+        "enemy_positions": {k: v[:] for k, v in st.session_state.enemy_positions.items()}  # 深いコピー
     }
-    
-    const position = cellId.split('-').slice(1).map(Number);
-    if (data === "player") {
-      Streamlit.setComponentValue({ type: "player", position });
-    } else if (data.startsWith("enemy")) {
-      const parts = data.split('-');
-      const enemyType = parts[3];
-      Streamlit.setComponentValue({ type: "enemy", enemyType, position });
-    }
-  }
+    st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.saved_board["enemy_positions"])
 
-  document.querySelectorAll('.draggable').forEach(el => {
-    el.setAttribute('ondragstart', 'drag(event)');
-  });
-</script>
-"""
+# 盤面を描画する関数
+def render_board(player_pos, enemy_positions, highlight_positions):
+    html_code = f"""
+    <style>
+      .container {{ display: flex; flex-direction: column; gap: 20px; }}
+      .board {{
+        display: grid;
+        grid-template-columns: repeat({BOARD_SIZE}, 50px);
+        grid-template-rows: repeat({BOARD_SIZE}, 50px);
+        gap: 1px;
+        background-color: black;
+        margin-right: 20px;
+      }}
+      .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; }}
+      .cell {{
+        width: 50px;
+        height: 50px;
+        background-color: #f0d9b5;
+        text-align: center;
+        line-height: 50px;
+        font-size: 24px;
+        font-weight: bold;
+        cursor: pointer;
+      }}
+      .highlight {{ background-color: #ffcccc; }}
+      .draggable {{ display: flex; align-items: center; justify-content: center; }}
+    </style>
+    <div class="board">
+    """
 
-# StreamlitにHTMLを埋め込む
-result = st.components.v1.html(html_code, height=BOARD_SIZE * 52 + 100, scrolling=False)
+    for x in range(BOARD_SIZE):
+        for y in range(BOARD_SIZE):
+            cell_id = f"cell-{x}-{y}"
+            content = ""
+            highlight_class = "highlight" if [x, y] in highlight_positions else ""
 
-# 新しい位置を受け取ったら更新
-if result is not None and isinstance(result, dict):
-    if result.get("type") == "player" and result.get("position"):
-        st.session_state.player_pos = result["position"]
-    elif result.get("type") == "enemy" and result.get("position"):
-        enemy_type = result["enemyType"]
-        st.session_state.enemy_positions[enemy_type].append(result["position"])
-    st.session_state.highlight_positions = calculate_highlight_positions()
-    st.rerun()
+            if [x, y] == player_pos:
+                content = '<div class="draggable" draggable="true" id="player">P</div>'
+            for enemy_type in ["E1", "E2"]:
+                if [x, y] in enemy_positions[enemy_type]:
+                    color = "red" if enemy_type == "E1" else "blue"
+                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
+
+            html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
+
+    html_code += "</div>"
+    return html_code
+
+st.components.v1.html(render_board(st.session_state.player_pos, st.session_state.enemy_positions, []), height=BOARD_SIZE * 52 + 100, scrolling=False)
+
+if st.session_state.saved_board:
+    st.write("### 敵の行動範囲ハイライト")
+    st.components.v1.html(render_board(st.session_state.saved_board["player_pos"], st.session_state.saved_board["enemy_positions"], st.session_state.highlight_positions), height=BOARD_SIZE * 52 + 100, scrolling=False)
