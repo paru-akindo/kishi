@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import json
 
 # 初期設定
@@ -13,6 +12,8 @@ if "enemy_positions" not in st.session_state:
     st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}
 if "highlight_positions" not in st.session_state:
     st.session_state.highlight_positions = []
+if "selected_pos" not in st.session_state:
+    st.session_state.selected_pos = None
 
 enemy_pool = {"E1": "E1", "E2": "E2"}
 
@@ -30,111 +31,48 @@ def calculate_highlight_positions(enemy_positions):
 if st.button("敵の行動範囲を更新"):
     st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.enemy_positions)
 
-def render_board(player_pos, enemy_positions, highlight_positions, include_enemy_pool=True):
-    html_code = f"""
-    <style>
-      .container {{ display: flex; flex-direction: column; gap: 20px; }}
-      .board {{
-        display: grid;
-        grid-template-columns: repeat({BOARD_SIZE}, 50px);
-        grid-template-rows: repeat({BOARD_SIZE}, 50px);
-        gap: 1px;
-        background-color: black;
-        margin-right: 20px;
-      }}
-      .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; margin-top: 10px; }}
-      .cell {{
-        width: 50px;
-        height: 50px;
-        background-color: #f0d9b5;
-        text-align: center;
-        line-height: 50px;
-        font-size: 24px;
-        font-weight: bold;
-        cursor: pointer;
-        position: relative;
-      }}
-      .highlight {{ background-color: #ffcccc; }}
-      .draggable {{ display: flex; align-items: center; justify-content: center; }}
-    </style>
-    <div class="board" ondrop="onDrop(event)" ondragover="allowDrop(event)">
-    """
+st.write("盤面上のコマをクリックして選択し、移動先のマスをクリックしてください")
 
+def render_board():
     for x in range(BOARD_SIZE):
+        cols = st.columns(BOARD_SIZE)
         for y in range(BOARD_SIZE):
-            cell_id = f"cell-{x}-{y}"
-            content = ""
-            highlight_class = "highlight" if [x, y] in highlight_positions else ""
+            label = ""
+            if [x, y] == st.session_state.player_pos:
+                label = "P"
+            else:
+                for enemy_type, positions in st.session_state.enemy_positions.items():
+                    if [x, y] in positions:
+                        label = enemy_type
 
-            if [x, y] == player_pos:
-                content = f'<div class="draggable" draggable="true" id="player">P</div>'
-            for enemy_type in ["E1", "E2"]:
-                if [x, y] in enemy_positions[enemy_type]:
-                    color = "red" if enemy_type == "E1" else "blue"
-                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
+            style = ""
+            if [x, y] == st.session_state.selected_pos:
+                style = "background-color: yellow;"
+            elif [x, y] in st.session_state.highlight_positions:
+                style = "background-color: #ffcccc;"
 
-            html_code += f'<div class="cell {highlight_class}" id="{cell_id}">{content}</div>'
+            if cols[y].button(label or " ", key=f"cell-{x}-{y}", help=f"{x},{y}", use_container_width=True):
+                if st.session_state.selected_pos is None:
+                    # コマがある場所なら選択
+                    if [x, y] == st.session_state.player_pos or any([x, y] in v for v in st.session_state.enemy_positions.values()):
+                        st.session_state.selected_pos = [x, y]
+                else:
+                    sel = st.session_state.selected_pos
+                    # プレイヤー移動
+                    if sel == st.session_state.player_pos:
+                        st.session_state.player_pos = [x, y]
+                    else:
+                        # 敵コマの移動
+                        for k, v in st.session_state.enemy_positions.items():
+                            if sel in v:
+                                v.remove(sel)
+                                v.append([x, y])
+                    st.session_state.selected_pos = None
 
-    html_code += "</div>"
+render_board()
 
-    if include_enemy_pool:
-        html_code += "<div class='enemy-pool'>"
-        for enemy_type, label in enemy_pool.items():
-            html_code += f'<div class="cell"><div class="draggable" draggable="true" id="enemy-{enemy_type}">{label}</div></div>'
-        html_code += "</div>"
-
-    html_code += """
-    <script>
-      function allowDrop(ev) {
-        ev.preventDefault();
-      }
-
-      function onDrop(ev) {
-        ev.preventDefault();
-        const data = ev.dataTransfer.getData("text");
-        const [type, ...rest] = data.split("-");
-        const targetId = ev.target.id;
-        if (!targetId.startsWith("cell-")) return;
-
-        const [, x, y] = targetId.split("-").map((v, i) => i > 0 ? parseInt(v) : v);
-
-        fetch("/move", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({type, x, y, extra: rest})
-        }).then(() => location.reload());
-      }
-
-      document.querySelectorAll('.draggable').forEach(el => {
-        el.addEventListener('dragstart', ev => {
-          ev.dataTransfer.setData("text", ev.target.id);
-        });
-      });
-    </script>
-    """
-    return html_code
-
-components.html(
-    render_board(
-        st.session_state.player_pos,
-        st.session_state.enemy_positions,
-        st.session_state.highlight_positions,
-        include_enemy_pool=True
-    ),
-    height=BOARD_SIZE * 52 + 150,
-    scrolling=False
-)
-
-# FastAPIサーバーでドラッグ結果を受け取って状態更新する（streamlitでは擬似実装）
-def handle_move():
-    import streamlit.web.server.websocket_headers
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
-    from streamlit.runtime.state import session_state
-
-    ctx = get_script_run_ctx()
-    headers = streamlit.web.server.websocket_headers.get()
-    body = st.experimental_get_query_params()
-    # 擬似的に move リクエストを処理（Streamlit Cloud ではフルFastAPI不可のため）
-    pass
-
-# NOTE: 通常のStreamlitではHTTPエンドポイントは使えないので、代替手段を検討中
+st.markdown("### 敵コマ置き場")
+enemy_cols = st.columns(len(enemy_pool))
+for idx, (enemy_type, label) in enumerate(enemy_pool.items()):
+    if enemy_cols[idx].button(label, key=f"spawn-{enemy_type}"):
+        st.session_state.enemy_positions[enemy_type].append([0, 0])  # 仮置きで 0,0 に追加（後で動かす）
