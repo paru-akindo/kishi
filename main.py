@@ -1,24 +1,21 @@
 import streamlit as st
+import streamlit.components.v1 as components
+import json
 
 # 初期設定
-BOARD_SIZE = 8  # 碁盤のサイズ
-player_pos = [3, 3]  # 自分のコマの初期位置
-initial_enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 敵のコマの初期位置
+BOARD_SIZE = 8
+player_pos = [3, 3]
+initial_enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}
 
-# セッション状態を保持
 if "player_pos" not in st.session_state:
     st.session_state.player_pos = player_pos
 if "enemy_positions" not in st.session_state:
-    st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}  # 変更しない初期値
+    st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}
 if "highlight_positions" not in st.session_state:
     st.session_state.highlight_positions = []
-if "saved_board" not in st.session_state:
-    st.session_state.saved_board = {}
 
-# 駒置き場の定義
 enemy_pool = {"E1": "E1", "E2": "E2"}
 
-# ハイライト範囲を計算する関数
 def calculate_highlight_positions(enemy_positions):
     highlight_positions = []
     for enemy_type, positions in enemy_positions.items():
@@ -30,15 +27,9 @@ def calculate_highlight_positions(enemy_positions):
                 highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
     return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
 
-# ボタンが押されたときに現在の盤面を保存し、ハイライトを計算
-if st.button("敵の行動範囲をハイライト"):
-    st.session_state.saved_board = {
-        "player_pos": st.session_state.player_pos,
-        "enemy_positions": {k: v[:] for k, v in st.session_state.enemy_positions.items()}  # 深いコピー
-    }
-    st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.saved_board["enemy_positions"])
+if st.button("敵の行動範囲を更新"):
+    st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.enemy_positions)
 
-# 盤面を描画する関数
 def render_board(player_pos, enemy_positions, highlight_positions, include_enemy_pool=True):
     html_code = f"""
     <style>
@@ -51,7 +42,7 @@ def render_board(player_pos, enemy_positions, highlight_positions, include_enemy
         background-color: black;
         margin-right: 20px;
       }}
-      .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; }}
+      .enemy-pool {{ display: grid; grid-template-columns: repeat(2, 50px); gap: 1px; margin-top: 10px; }}
       .cell {{
         width: 50px;
         height: 50px;
@@ -61,11 +52,12 @@ def render_board(player_pos, enemy_positions, highlight_positions, include_enemy
         font-size: 24px;
         font-weight: bold;
         cursor: pointer;
+        position: relative;
       }}
       .highlight {{ background-color: #ffcccc; }}
       .draggable {{ display: flex; align-items: center; justify-content: center; }}
     </style>
-    <div class="board">
+    <div class="board" ondrop="onDrop(event)" ondragover="allowDrop(event)">
     """
 
     for x in range(BOARD_SIZE):
@@ -75,43 +67,74 @@ def render_board(player_pos, enemy_positions, highlight_positions, include_enemy
             highlight_class = "highlight" if [x, y] in highlight_positions else ""
 
             if [x, y] == player_pos:
-                content = f'<div class="draggable" draggable="true" id="player" ondragstart="drag(event)">P</div>'
+                content = f'<div class="draggable" draggable="true" id="player">P</div>'
             for enemy_type in ["E1", "E2"]:
                 if [x, y] in enemy_positions[enemy_type]:
                     color = "red" if enemy_type == "E1" else "blue"
-                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" ondragstart="drag(event)" style="color: {color};">{enemy_type}</div>'
+                    content = f'<div class="draggable" draggable="true" id="enemy-{x}-{y}-{enemy_type}" style="color: {color};">{enemy_type}</div>'
 
-            html_code += f'<div class="cell {highlight_class}" id="{cell_id}" ondrop="drop(event)" ondragover="allowDrop(event)">{content}</div>'
+            html_code += f'<div class="cell {highlight_class}" id="{cell_id}">{content}</div>'
 
     html_code += "</div>"
-    
+
     if include_enemy_pool:
         html_code += "<div class='enemy-pool'>"
         for enemy_type, label in enemy_pool.items():
-            html_code += f'<div class="cell" id="pool-{enemy_type}" ondrop="drop(event)" ondragover="allowDrop(event)"><div class="draggable" draggable="true" id="enemy-{enemy_type}" ondragstart="drag(event)">{label}</div></div>'
+            html_code += f'<div class="cell"><div class="draggable" draggable="true" id="enemy-{enemy_type}">{label}</div></div>'
         html_code += "</div>"
-    
+
     html_code += """
     <script>
-    function allowDrop(ev) {{
-      ev.preventDefault();
-    }}
-    function drag(ev) {{
-      ev.dataTransfer.setData("text", ev.target.id);
-    }}
-    function drop(ev) {{
-      ev.preventDefault();
-      var data = ev.dataTransfer.getData("text");
-      var draggedElement = document.getElementById(data);
-      ev.target.appendChild(draggedElement);
-    }}
+      function allowDrop(ev) {
+        ev.preventDefault();
+      }
+
+      function onDrop(ev) {
+        ev.preventDefault();
+        const data = ev.dataTransfer.getData("text");
+        const [type, ...rest] = data.split("-");
+        const targetId = ev.target.id;
+        if (!targetId.startsWith("cell-")) return;
+
+        const [, x, y] = targetId.split("-").map((v, i) => i > 0 ? parseInt(v) : v);
+
+        fetch("/move", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({type, x, y, extra: rest})
+        }).then(() => location.reload());
+      }
+
+      document.querySelectorAll('.draggable').forEach(el => {
+        el.addEventListener('dragstart', ev => {
+          ev.dataTransfer.setData("text", ev.target.id);
+        });
+      });
     </script>
     """
-    
     return html_code
 
-st.components.v1.html(render_board(st.session_state.player_pos, st.session_state.enemy_positions, [], include_enemy_pool=True), height=BOARD_SIZE * 52 + 150, scrolling=False)
+components.html(
+    render_board(
+        st.session_state.player_pos,
+        st.session_state.enemy_positions,
+        st.session_state.highlight_positions,
+        include_enemy_pool=True
+    ),
+    height=BOARD_SIZE * 52 + 150,
+    scrolling=False
+)
 
-if st.session_state.saved_board:
-    st.write("### 敵の行動範囲ハイライト")
-    st.components.v1.html(render_board(st.session_state.saved_board["player_pos"], st.session_state.saved_board["enemy_positions"], st.session_state.highlight_positions, include_enemy_pool=False), height=BOARD_SIZE * 52 + 100, scrolling=False)
+# FastAPIサーバーでドラッグ結果を受け取って状態更新する（streamlitでは擬似実装）
+def handle_move():
+    import streamlit.web.server.websocket_headers
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    from streamlit.runtime.state import session_state
+
+    ctx = get_script_run_ctx()
+    headers = streamlit.web.server.websocket_headers.get()
+    body = st.experimental_get_query_params()
+    # 擬似的に move リクエストを処理（Streamlit Cloud ではフルFastAPI不可のため）
+    pass
+
+# NOTE: 通常のStreamlitではHTTPエンドポイントは使えないので、代替手段を検討中
