@@ -51,7 +51,7 @@ def render_board():
             elif [x, y] in st.session_state.highlight_positions:
                 style = "background-color: #ffcccc;"
 
-            if cols[y].button(label or " ", key=f"cell-{x}-{y}", help=f"{x},{y}", use_container_width=True):
+            if cols[y].button(label or " ", key=f"cell-{x}-{y}", help=f"{x},{y}"):
                 if st.session_state.selected_pos is None:
                     # コマがある場所なら選択
                     if [x, y] == st.session_state.player_pos or any([x, y] in v for v in st.session_state.enemy_positions.values()):
@@ -62,12 +62,12 @@ def render_board():
                     if sel == st.session_state.player_pos:
                         st.session_state.player_pos = [x, y]
                     else:
-                        # 敵コマの移動
-                        for k, v in st.session_state.enemy_positions.items():
-                            if sel in v:
-                                v.remove(sel)
-                                v.append([x, y])
+                        for k in st.session_state.enemy_positions:
+                            if sel in st.session_state.enemy_positions[k]:
+                                st.session_state.enemy_positions[k] = [pos for pos in st.session_state.enemy_positions[k] if pos != sel]
+                                st.session_state.enemy_positions[k].append([x, y])
                     st.session_state.selected_pos = None
+                    st.session_state.highlight_positions = []  # 移動後はハイライトを一旦消す
 
 render_board()
 
@@ -75,4 +75,4 @@ st.markdown("### 敵コマ置き場")
 enemy_cols = st.columns(len(enemy_pool))
 for idx, (enemy_type, label) in enumerate(enemy_pool.items()):
     if enemy_cols[idx].button(label, key=f"spawn-{enemy_type}"):
-        st.session_state.enemy_positions[enemy_type].append([0, 0])  # 仮置きで 0,0 に追加（後で動かす）
+        st.session_state.enemy_positions[enemy_type].append([0, 0])
