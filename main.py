@@ -1,105 +1,84 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import json
 
-# 初期設定
-BOARD_SIZE = 8
-player_pos = [3, 3]
-initial_enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}
+# セッションステートの初期化
+if "board" not in st.session_state:
+    # 8x8のボード。各セルは (row, col) をキーに、None または駒の文字列（例："knight", "rook"）を保持する
+    st.session_state.board = {(r, c): None for r in range(8) for c in range(8)}
+if "selected_piece_coord" not in st.session_state:
+    st.session_state.selected_piece_coord = None
+if "highlighted_moves" not in st.session_state:
+    st.session_state.highlighted_moves = []
 
-if "player_pos" not in st.session_state:
-    st.session_state.player_pos = player_pos
-if "enemy_positions" not in st.session_state:
-    st.session_state.enemy_positions = {"E1": [[1, 1]], "E2": [[6, 6]]}
-if "highlight_positions" not in st.session_state:
-    st.session_state.highlight_positions = []
+def compute_moves(piece, pos):
+    """
+    与えられた駒の種類と現在の位置 pos に対して、移動可能なセルの座標リストを返す。
+    この例では knight（ナイト）と rook（ルーク）のみを実装。
+    """
+    moves = []
+    r, c = pos
+    if piece == "knight":
+        # ナイトの移動パターン：L字型
+        offsets = [(2, 1), (2, -1), (-2, 1), (-2, -1), (1, 2), (1, -2), (-1, 2), (-1, -2)]
+        for dr, dc in offsets:
+            r_new = r + dr
+            c_new = c + dc
+            if 0 <= r_new < 8 and 0 <= c_new < 8:
+                moves.append((r_new, c_new))
+    elif piece == "rook":
+        # ルークは縦横全方向
+        for i in range(8):
+            if i != r:
+                moves.append((i, c))
+        for j in range(8):
+            if j != c:
+                moves.append((r, j))
+    # 他の駒の動きをここに追加可能
+    return moves
 
-# ハイライト更新
-if st.button("敵の行動範囲を更新"):
-    def calculate_highlight_positions(enemy_positions):
-        highlight_positions = []
-        for enemy_type, positions in enemy_positions.items():
-            for pos in positions:
-                x, y = pos
-                if enemy_type == "E1":
-                    highlight_positions += [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]
-                elif enemy_type == "E2":
-                    highlight_positions += [[x - 1, y - 1], [x - 1, y + 1], [x + 1, y - 1], [x + 1, y + 1]]
-        return [pos for pos in highlight_positions if 0 <= pos[0] < BOARD_SIZE and 0 <= pos[1] < BOARD_SIZE]
+st.title("チェス風ボードの移動範囲表示")
 
-    st.session_state.highlight_positions = calculate_highlight_positions(st.session_state.enemy_positions)
+# サイドバーで駒を配置するための設定
+st.sidebar.subheader("駒を配置する")
+piece_type = st.sidebar.selectbox("駒の種類を選択", ["knight", "rook"])
+place_cell = st.sidebar.text_input("配置するセル (例: 3,4)", value="")
 
-# HTML描画
-positions = {"P": st.session_state.player_pos}
-for t in ["E1", "E2"]:
-    for i, pos in enumerate(st.session_state.enemy_positions[t]):
-        positions[f"{t}_{i}"] = pos
+if st.sidebar.button("駒を配置") and place_cell:
+    try:
+        # カンマ区切りの入力から行と列を取得
+        row, col = map(int, place_cell.split(","))
+        if 0 <= row < 8 and 0 <= col < 8:
+            st.session_state.board[(row, col)] = piece_type
+        else:
+            st.sidebar.write("セルの値は 0 から 7 の範囲で指定してください。")
+    except Exception as e:
+        st.sidebar.write("入力フォーマットが正しくありません。例: 3,4")
 
-highlight_json = json.dumps(st.session_state.highlight_positions)
+st.write("※ボード上のセルをクリックすると、そこに駒がある場合はその駒の移動可能範囲をハイライトします。ハイライトされたセルをクリックすると、駒が移動されます。")
 
-board_html = f"""
-<style>
-  .board {{ display: grid; grid-template-columns: repeat({BOARD_SIZE}, 40px); grid-gap: 2px; }}
-  .cell {{ width: 40px; height: 40px; border: 1px solid #ccc; text-align: center; line-height: 40px; font-weight: bold; }}
-  .highlight {{ background-color: #ffcccc; }}
-  .player {{ background-color: #ccf; }}
-  .enemy {{ background-color: #fdd; }}
-  .dragging {{ opacity: 0.5; }}
-</style>
-<div class="board" id="board">
-"""
-
-for x in range(BOARD_SIZE):
-    for y in range(BOARD_SIZE):
-        piece = ""
-        css_class = "cell"
-        for name, pos in positions.items():
-            if pos == [x, y]:
-                piece = name
-                if name == "P":
-                    css_class += " player"
-                elif name.startswith("E"):
-                    css_class += " enemy"
-        if [x, y] in st.session_state.highlight_positions:
-            css_class += " highlight"
-        board_html += f'<div class="{{css_class}}" data-pos="{x},{y}" draggable="true">{{piece}}</div>'
-
-board_html += "</div>"
-
-board_html += f"""
-<script>
-  let dragged = null;
-  document.querySelectorAll('.cell').forEach(cell => {{
-    cell.addEventListener('dragstart', e => {{
-      dragged = cell;
-      setTimeout(() => cell.classList.add('dragging'), 0);
-    }});
-    cell.addEventListener('dragend', e => {{
-      dragged.classList.remove('dragging');
-      dragged = null;
-    }});
-    cell.addEventListener('dragover', e => e.preventDefault());
-    cell.addEventListener('drop', e => {{
-      e.preventDefault();
-      const from = dragged.getAttribute('data-pos');
-      const to = cell.getAttribute('data-pos');
-      const label = dragged.innerText;
-      fetch('/', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ "from": from, "to": to, "label": label }})
-      }}).then(() => location.reload());
-    }});
-  }});
-</script>
-"""
-
-components.html(board_html, height=BOARD_SIZE * 45 + 100)
-
-# 敵コマ置き場
-st.markdown("### 敵コマ置き場")
-enemy_pool = {"E1": "E1", "E2": "E2"}
-enemy_cols = st.columns(len(enemy_pool))
-for idx, (enemy_type, label) in enumerate(enemy_pool.items()):
-    if enemy_cols[idx].button(label, key=f"spawn-{enemy_type}"):
-        st.session_state.enemy_positions[enemy_type].append([0, 0])
+# ボードのレンダリング
+for r in range(8):
+    cols = st.columns(8)
+    for c in range(8):
+        cell = (r, c)
+        # セルに表示する文字列：駒がある場合はその名前、なければドットで表示
+        cell_content = st.session_state.board[cell] if st.session_state.board[cell] is not None else ""
+        # 移動可能範囲に含まれている場合は見た目を変える（ここでは装飾用に ** を付加）
+        if cell in st.session_state.highlighted_moves:
+            button_label = f"**{cell_content}**" if cell_content else "**.**"
+        else:
+            button_label = cell_content if cell_content else "."
+        # 各セルをボタンとして配置
+        if cols[c].button(button_label, key=f"cell_{r}_{c}"):
+            # もしクリックされたセルに駒があるなら、その駒を選択して移動可能範囲を算出
+            if st.session_state.board[cell] is not None:
+                st.session_state.selected_piece_coord = cell
+                st.session_state.highlighted_moves = compute_moves(st.session_state.board[cell], cell)
+            else:
+                # すでに選択中の駒があり、クリックされたセルが移動可能な範囲内なら移動実行
+                if cell in st.session_state.highlighted_moves and st.session_state.selected_piece_coord is not None:
+                    piece = st.session_state.board[st.session_state.selected_piece_coord]
+                    st.session_state.board[cell] = piece
+                    st.session_state.board[st.session_state.selected_piece_coord] = None
+                # 移動後、選択状態とハイライトをクリア
+                st.session_state.selected_piece_coord = None
+                st.session_state.highlighted_moves = []
