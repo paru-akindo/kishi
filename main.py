@@ -1,84 +1,243 @@
 import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
+import random
+import copy
 
-# セッションステートの初期化
-if "board" not in st.session_state:
-    # 8x8のボード。各セルは (row, col) をキーに、None または駒の文字列（例："knight", "rook"）を保持する
-    st.session_state.board = {(r, c): None for r in range(8) for c in range(8)}
-if "selected_piece_coord" not in st.session_state:
-    st.session_state.selected_piece_coord = None
-if "highlighted_moves" not in st.session_state:
-    st.session_state.highlighted_moves = []
+# --- 定数定義 ---
+CELL_SIZE = 40
+ROWS = 11
+COLS = 9
 
-def compute_moves(piece, pos):
+# セルの状態
+EMPTY = 0
+CAT = 1
+CHICK = 2
+COW = 3
+
+# 色マップ（Matplotlibで利用する色名）
+COLOR_MAP = {
+    EMPTY: "white",
+    CAT: "orange",
+    CHICK: "yellow",
+    COW: "brown"
+}
+
+# --- ボードクラス ---
+class Board:
+    def __init__(self, rows=ROWS, cols=COLS):
+        self.rows = rows
+        self.cols = cols
+        self.grid = [[EMPTY for _ in range(cols)] for _ in range(rows)]
+    
+    def copy(self):
+        new_board = Board(self.rows, self.cols)
+        new_board.grid = copy.deepcopy(self.grid)
+        return new_board
+
+    def slide_row(self, row_index, direction):
+        """指定した行を左右にスライドする。"""
+        if direction == "left":
+            self.grid[row_index] = self.grid[row_index][1:] + [self.grid[row_index][0]]
+        elif direction == "right":
+            self.grid[row_index] = [self.grid[row_index][-1]] + self.grid[row_index][:-1]
+
+    def apply_gravity(self):
+        """各列ごとに、下に空きがあれば上のブロックを落下させる。"""
+        for col in range(self.cols):
+            for row in range(self.rows - 2, -1, -1):
+                if self.grid[row][col] != EMPTY:
+                    current_row = row
+                    while current_row + 1 < self.rows and self.grid[current_row + 1][col] == EMPTY:
+                        self.grid[current_row + 1][col] = self.grid[current_row][col]
+                        self.grid[current_row][col] = EMPTY
+                        current_row += 1
+
+    def add_new_row(self, new_row):
+        """上端の行を削除して、下端に新行を追加する。"""
+        self.grid.pop(0)
+        self.grid.append(new_row.copy())
+        self.apply_gravity()
+
+    def clear_filled_rows(self):
+        """各行のすべてのセルが埋まっている場合、その行をクリアする。"""
+        rows_cleared = 0
+        for i in range(self.rows):
+            if all(cell != EMPTY for cell in self.grid[i]):
+                self.grid[i] = [EMPTY for _ in range(self.cols)]
+                rows_cleared += 1
+        if rows_cleared > 0:
+            self.apply_gravity()
+        return rows_cleared
+
+    def get_empty_count(self):
+        """盤面全体の EMPTY セル数を数える（評価用）。"""
+        count = 0
+        for row in self.grid:
+            count += sum(1 for cell in row if cell == EMPTY)
+        return count
+
+    def game_over(self):
+        """最上行に1つでもブロックがあるとゲームオーバーとする例。"""
+        return any(cell != EMPTY for cell in self.grid[0])
+
+# --- 補助関数 ---
+def generate_new_row():
+    """新しい行をランダムな動物ブロックで生成する。"""
+    return [random.choice([CAT, CHICK, COW]) for _ in range(COLS)]
+
+def evaluate_board(board):
     """
-    与えられた駒の種類と現在の位置 pos に対して、移動可能なセルの座標リストを返す。
-    この例では knight（ナイト）と rook（ルーク）のみを実装。
+    単純な評価関数：盤面内の EMPTY セル数を返す。
+    空きセルが多い状態を評価が高いものと仮定。
     """
-    moves = []
-    r, c = pos
-    if piece == "knight":
-        # ナイトの移動パターン：L字型
-        offsets = [(2, 1), (2, -1), (-2, 1), (-2, -1), (1, 2), (1, -2), (-1, 2), (-1, -2)]
-        for dr, dc in offsets:
-            r_new = r + dr
-            c_new = c + dc
-            if 0 <= r_new < 8 and 0 <= c_new < 8:
-                moves.append((r_new, c_new))
-    elif piece == "rook":
-        # ルークは縦横全方向
-        for i in range(8):
-            if i != r:
-                moves.append((i, c))
-        for j in range(8):
-            if j != c:
-                moves.append((r, j))
-    # 他の駒の動きをここに追加可能
-    return moves
+    return board.get_empty_count()
 
-st.title("チェス風ボードの移動範囲表示")
+def simulate_turn(board, new_row):
+    """新行追加、重力適用、行クリアを１ターンで実行する。"""
+    board.add_new_row(new_row)
+    cleared = board.clear_filled_rows()
+    return cleared
 
-# サイドバーで駒を配置するための設定
-st.sidebar.subheader("駒を配置する")
-piece_type = st.sidebar.selectbox("駒の種類を選択", ["knight", "rook"])
-place_cell = st.sidebar.text_input("配置するセル (例: 3,4)", value="")
+def get_optimal_move(board, new_row):
+    """
+    各行の左右スライドを試し、新行追加後の盤面状態を評価して、
+    もっとも評価値（空セル数）が高い動きを返す。
+    """
+    best_score = -float('inf')
+    best_move = None
+    for row in range(board.rows):
+        for direction in ['left', 'right']:
+            temp_board = board.copy()
+            temp_board.slide_row(row, direction)
+            temp_board.add_new_row(new_row)
+            temp_board.clear_filled_rows()
+            score = evaluate_board(temp_board)
+            if score > best_score:
+                best_score = score
+                best_move = (row, direction)
+    return best_move, best_score
 
-if st.sidebar.button("駒を配置") and place_cell:
-    try:
-        # カンマ区切りの入力から行と列を取得
-        row, col = map(int, place_cell.split(","))
-        if 0 <= row < 8 and 0 <= col < 8:
-            st.session_state.board[(row, col)] = piece_type
-        else:
-            st.sidebar.write("セルの値は 0 から 7 の範囲で指定してください。")
-    except Exception as e:
-        st.sidebar.write("入力フォーマットが正しくありません。例: 3,4")
+def draw_board(board):
+    """Matplotlib を使って盤面を描画する。"""
+    fig, ax = plt.subplots(figsize=(COLS, ROWS))
+    ax.set_xlim(0, COLS * CELL_SIZE)
+    ax.set_ylim(0, ROWS * CELL_SIZE)
+    # y 軸は逆転させる（左上が0,0になるように）
+    ax.invert_yaxis()
+    for i in range(ROWS):
+        for j in range(COLS):
+            x = j * CELL_SIZE
+            y = i * CELL_SIZE
+            cell = board.grid[i][j]
+            rect = patches.Rectangle((x, y), CELL_SIZE, CELL_SIZE,
+                                     linewidth=1, edgecolor='black', facecolor=COLOR_MAP.get(cell, "white"))
+            ax.add_patch(rect)
+            # ブロックがある場合、テキストでブロック名を描画
+            if cell != EMPTY:
+                if cell == CAT:
+                    text = "Cat"
+                elif cell == CHICK:
+                    text = "Chick"
+                elif cell == COW:
+                    text = "Cow"
+                ax.text(x + CELL_SIZE/2, y + CELL_SIZE/2, text, ha='center', va='center', fontsize=8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return fig
 
-st.write("※ボード上のセルをクリックすると、そこに駒がある場合はその駒の移動可能範囲をハイライトします。ハイライトされたセルをクリックすると、駒が移動されます。")
+def draw_new_row(new_row):
+    """新行のプレビューを描画する。"""
+    fig, ax = plt.subplots(figsize=(COLS, 1))
+    ax.set_xlim(0, COLS * CELL_SIZE)
+    ax.set_ylim(0, CELL_SIZE)
+    ax.invert_yaxis()
+    for j in range(COLS):
+        x = j * CELL_SIZE
+        rect = patches.Rectangle((x, 0), CELL_SIZE, CELL_SIZE, linewidth=1,
+                                 edgecolor='black', facecolor=COLOR_MAP.get(new_row[j], "white"))
+        ax.add_patch(rect)
+        if new_row[j] != EMPTY:
+            if new_row[j] == CAT:
+                text = "Cat"
+            elif new_row[j] == CHICK:
+                text = "Chick"
+            elif new_row[j] == COW:
+                text = "Cow"
+            ax.text(x + CELL_SIZE/2, CELL_SIZE/2, text, ha='center', va='center', fontsize=8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    # 上部に黄色い線を表示
+    ax.axhline(0, color='yellow', linewidth=3)
+    return fig
 
-# ボードのレンダリング
-for r in range(8):
-    cols = st.columns(8)
-    for c in range(8):
-        cell = (r, c)
-        # セルに表示する文字列：駒がある場合はその名前、なければドットで表示
-        cell_content = st.session_state.board[cell] if st.session_state.board[cell] is not None else ""
-        # 移動可能範囲に含まれている場合は見た目を変える（ここでは装飾用に ** を付加）
-        if cell in st.session_state.highlighted_moves:
-            button_label = f"**{cell_content}**" if cell_content else "**.**"
-        else:
-            button_label = cell_content if cell_content else "."
-        # 各セルをボタンとして配置
-        if cols[c].button(button_label, key=f"cell_{r}_{c}"):
-            # もしクリックされたセルに駒があるなら、その駒を選択して移動可能範囲を算出
-            if st.session_state.board[cell] is not None:
-                st.session_state.selected_piece_coord = cell
-                st.session_state.highlighted_moves = compute_moves(st.session_state.board[cell], cell)
-            else:
-                # すでに選択中の駒があり、クリックされたセルが移動可能な範囲内なら移動実行
-                if cell in st.session_state.highlighted_moves and st.session_state.selected_piece_coord is not None:
-                    piece = st.session_state.board[st.session_state.selected_piece_coord]
-                    st.session_state.board[cell] = piece
-                    st.session_state.board[st.session_state.selected_piece_coord] = None
-                # 移動後、選択状態とハイライトをクリア
-                st.session_state.selected_piece_coord = None
-                st.session_state.highlighted_moves = []
+# --- Streamlit セッション状態の管理 ---
+if 'board' not in st.session_state:
+    st.session_state.board = Board()
+if 'new_row' not in st.session_state:
+    st.session_state.new_row = generate_new_row()
+if 'selected_row' not in st.session_state:
+    st.session_state.selected_row = None
+if 'message' not in st.session_state:
+    st.session_state.message = "操作してください。"
+
+st.title("Haru Cats シミュレーション＆最適解探索 (Streamlit版)")
+
+# 盤面の描画
+st.subheader("盤面")
+fig_board = draw_board(st.session_state.board)
+st.pyplot(fig_board)
+
+# 新行プレビューの描画
+st.subheader("次ターンに追加される行")
+fig_new_row = draw_new_row(st.session_state.new_row)
+st.pyplot(fig_new_row)
+
+st.write(st.session_state.message)
+
+# --- 操作用ボタン ---
+col1, col2, col3, col4 = st.columns(4)
+
+# 左にスライド
+if col1.button("左にスライド"):
+    if st.session_state.selected_row is not None:
+        st.session_state.board.slide_row(st.session_state.selected_row, "left")
+        st.session_state.board.apply_gravity()
+        st.session_state.message = f"{st.session_state.selected_row} 行目を左にスライドしました。"
+    else:
+        st.session_state.message = "まず行番号（0～10）を入力してください。"
+    
+# 右にスライド
+if col2.button("右にスライド"):
+    if st.session_state.selected_row is not None:
+        st.session_state.board.slide_row(st.session_state.selected_row, "right")
+        st.session_state.board.apply_gravity()
+        st.session_state.message = f"{st.session_state.selected_row} 行目を右にスライドしました。"
+    else:
+        st.session_state.message = "まず行番号（0～10）を入力してください。"
+    
+# 最適解の提示
+if col3.button("最適解を提示"):
+    move, score = get_optimal_move(st.session_state.board, st.session_state.new_row)
+    if move is not None:
+        row, direction = move
+        st.session_state.selected_row = row
+        st.session_state.message = f"提案：{row} 行目を「{direction}」にスライド（評価: {score}）"
+    else:
+        st.session_state.message = "有効な手が見つかりませんでした。"
+    
+# 次のターン
+if col4.button("次のターン"):
+    cleared = simulate_turn(st.session_state.board, st.session_state.new_row)
+    st.session_state.message = f"次のターン実行！（消去行：{cleared}）"
+    st.session_state.new_row = generate_new_row()
+    # ゲームオーバーチェック
+    if st.session_state.board.game_over():
+        st.session_state.message = "ゲームオーバー！"
+
+# 入力欄：操作したい行番号（0～10）
+selected_row_input = st.number_input("行番号を指定（0～10）", min_value=0, max_value=ROWS-1, step=1)
+st.session_state.selected_row = int(selected_row_input)
+
+# 再描画するために、アプリの各操作後に st.experimental_rerun() を呼ぶのも有効です。
