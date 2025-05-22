@@ -9,18 +9,26 @@ CELL_SIZE = 40
 ROWS = 11
 COLS = 9
 
-# セルの状態（例）
+# セルの状態
 EMPTY = 0
 CAT = 1
 CHICK = 2
 COW = 3
 
-# Matplotlib 用の色マップ
+# 特殊動物（頭・胴体）の定義
+SPECIAL_HEAD_LEFT = 4    # 左向き頭
+SPECIAL_BODY = 5         # 胴体部分（共通）
+SPECIAL_HEAD_RIGHT = 6   # 右向き頭
+
+# Matplotlib 用の色マップ（表示色はお好みで）
 COLOR_MAP = {
     EMPTY: "white",
     CAT: "orange",
     CHICK: "yellow",
-    COW: "brown"
+    COW: "brown",
+    SPECIAL_HEAD_LEFT: "blue",
+    SPECIAL_BODY: "lightblue",
+    SPECIAL_HEAD_RIGHT: "purple"
 }
 
 # --- 盤面クラス ---
@@ -54,68 +62,88 @@ class Board:
                         current_row += 1
 
     def add_new_row(self, new_row):
-        """上端の行を削除して、下端に新行を追加する。（従来の動作）"""
+        """
+        上端の行を削除し、下端に新行を追加する（新行は必ず下に追加される）。
+        """
         self.grid.pop(0)
         self.grid.append(new_row.copy())
         self.apply_gravity()
 
-    def insert_new_row_at(self, new_row, index):
-        """
-        指定したインデックス位置に新行を挿入する。
-        ※ 盤面サイズは固定のため、挿入後に下端がはみ出る場合は一番下の行を削除する。
-        """
-        self.grid.insert(index, new_row.copy())
-        if len(self.grid) > self.rows:
-            self.grid.pop()  # 最下行を削除
-        self.apply_gravity()
-
     def clear_filled_rows(self):
-        """各行が全て埋まっていればその行をクリアする."""
+        """
+        各行が全セル埋まっている場合、
+        通常の動物は消去するが、特殊動物グループは縮む処理を行う。
+        ※ 連続する特殊動物グループで、グループ長 >= 2 なら右端1セル分短くなるが、
+        結果として特殊頭のみになった場合はその特殊動物も消去する。
+        """
         rows_cleared = 0
-        for i in range(self.rows):
-            if all(cell != EMPTY for cell in self.grid[i]):
-                self.grid[i] = [EMPTY for _ in range(self.cols)]
+        special_set = {SPECIAL_HEAD_LEFT, SPECIAL_HEAD_RIGHT, SPECIAL_BODY}
+        for r in range(self.rows):
+            # 行が FULL（すべてが EMPTY ではない）なら
+            if all(cell != EMPTY for cell in self.grid[r]):
+                new_row = [EMPTY for _ in range(self.cols)]
+                c = 0
+                while c < self.cols:
+                    if self.grid[r][c] in special_set:
+                        start = c
+                        while c < self.cols and self.grid[r][c] in special_set:
+                            c += 1
+                        segment_length = c - start
+                        if segment_length >= 2:
+                            # グループが2以上なら、右端1セル減らす（縮む）
+                            for j in range(start, c - 1):
+                                new_row[j] = self.grid[r][j]
+                            new_row[c - 1] = EMPTY
+                        else:
+                            # グループが1なら、頭だけなので消去（そのままEMPTY）
+                            pass
+                    else:
+                        c += 1
+                self.grid[r] = new_row
                 rows_cleared += 1
         if rows_cleared > 0:
             self.apply_gravity()
         return rows_cleared
 
     def get_empty_count(self):
-        """盤面全体の EMPTY セル数を数える（評価用）"""
+        """盤面全体の EMPTY セル数を返す（評価用）"""
         count = 0
         for row in self.grid:
             count += sum(1 for cell in row if cell == EMPTY)
         return count
 
     def game_over(self):
-        """最上行にブロックがあるならゲームオーバーとする."""
+        """最上行にブロックがある場合、ゲームオーバーとする."""
         return any(cell != EMPTY for cell in self.grid[0])
 
 # --- 補助関数 ---
 def generate_new_row():
-    """新しい行をランダムに生成する。"""
+    """
+    新しい行をランダムに生成する。
+    ここでは通常動物（CAT, CHICK, COW）のみを対象としています。
+    """
     return [random.choice([CAT, CHICK, COW]) for _ in range(COLS)]
 
 def evaluate_board(board):
     """
-    単純な評価関数：盤面内の EMPTY セル数を返す。
-    空きセルが多い状態を高得点として評価する。
+    単純な評価関数：盤面全体の EMPTY セル数を返す。
+    空きが多いほど状態が良いと評価します。
     """
     return board.get_empty_count()
 
-def simulate_turn(board, new_row, insertion_index):
+def simulate_turn(board, new_row):
     """
-    新行を指定の位置に挿入し、重力適用・行クリアを行う。
-    ユーザー指定の挿入位置と、新行内容を利用する。
+    新行を下端に追加し、重力適用・行クリアを実行する。
     """
-    board.insert_new_row_at(new_row, insertion_index)
+    board.add_new_row(new_row)
     cleared = board.clear_filled_rows()
     return cleared
 
 def get_optimal_move(board, new_row):
     """
-    各行の左右スライドを試し、新行追加後の盤面状態を評価して、
-    最も評価値（空セル数）が高い動きを返す。
+    各行の左右スライドを試して、新行追加後の盤面状態を評価します。
+    評価は EMPTY セル数（空きの多さ）を基準にし、最も好ましい動きを返します。
+    ※ シミュレーションでは新行は必ず下に追加します。
     """
     best_score = -float('inf')
     best_move = None
@@ -123,8 +151,7 @@ def get_optimal_move(board, new_row):
         for direction in ['left', 'right']:
             temp_board = board.copy()
             temp_board.slide_row(row, direction)
-            # ここでは従来どおり末尾に新行を追加して評価
-            temp_board.insert_new_row_at(new_row, ROWS)
+            temp_board.add_new_row(new_row)
             temp_board.clear_filled_rows()
             score = evaluate_board(temp_board)
             if score > best_score:
@@ -133,11 +160,11 @@ def get_optimal_move(board, new_row):
     return best_move, best_score
 
 def draw_board(board):
-    """Matplotlib を使って盤面を描画する."""
+    """Matplotlib を用いて盤面を描画する."""
     fig, ax = plt.subplots(figsize=(COLS, ROWS))
     ax.set_xlim(0, COLS * CELL_SIZE)
     ax.set_ylim(0, ROWS * CELL_SIZE)
-    ax.invert_yaxis()  # 左上が (0,0) となるように
+    ax.invert_yaxis()  # 左上を (0,0) とする
     for i in range(ROWS):
         for j in range(COLS):
             x = j * CELL_SIZE
@@ -154,6 +181,12 @@ def draw_board(board):
                     text = "Chick"
                 elif cell == COW:
                     text = "Cow"
+                elif cell == SPECIAL_HEAD_LEFT:
+                    text = "SpHL"
+                elif cell == SPECIAL_HEAD_RIGHT:
+                    text = "SpHR"
+                elif cell == SPECIAL_BODY:
+                    text = "SpB"
                 ax.text(x + CELL_SIZE/2, y + CELL_SIZE/2, text,
                         ha='center', va='center', fontsize=8)
     ax.set_xticks([])
@@ -179,23 +212,28 @@ def draw_new_row(new_row):
                 text = "Chick"
             elif new_row[j] == COW:
                 text = "Cow"
+            elif new_row[j] == SPECIAL_HEAD_LEFT:
+                text = "SpHL"
+            elif new_row[j] == SPECIAL_HEAD_RIGHT:
+                text = "SpHR"
+            elif new_row[j] == SPECIAL_BODY:
+                text = "SpB"
             ax.text(x + CELL_SIZE/2, CELL_SIZE/2, text,
                     ha='center', va='center', fontsize=8)
     ax.set_xticks([])
     ax.set_yticks([])
-    # 上部に黄色い線を表示
-    ax.axhline(0, color='yellow', linewidth=3)
+    ax.axhline(0, color='yellow', linewidth=3)  # 上部に黄色い線
     return fig
 
 def parse_board_input(input_str):
     """
-    ユーザーが入力した盤面文字列を、11×9の2次元リストに変換する。
+    ユーザーの入力文字列から盤面（11×9の2次元リスト）を生成する。
     例:
       "0 0 0 0 0 0 0 0 0\n1 0 2 0 3 0 0 1 0\n..."
     """
     lines = input_str.strip().splitlines()
     if len(lines) != ROWS:
-        raise ValueError(f"行数は必ず {ROWS} 行でなければなりません。入力行数: {len(lines)}")
+        raise ValueError(f"盤面は必ず {ROWS} 行でなければなりません。入力行数: {len(lines)}")
     
     board_data = []
     for line in lines:
@@ -208,7 +246,7 @@ def parse_board_input(input_str):
 
 def parse_new_row_input(input_str):
     """
-    ユーザーが入力した新行内容（1 行の文字列）を、COLS 個の数字のリストに変換する。
+    ユーザーの入力から新行内容（1 行、9個の数字）を生成する。
     例: "1 0 2 0 3 0 1 0 2"
     """
     parts = input_str.strip().split()
@@ -225,11 +263,7 @@ if 'selected_row' not in st.session_state:
     st.session_state.selected_row = None
 if 'message' not in st.session_state:
     st.session_state.message = "操作してください。"
-if 'insertion_index' not in st.session_state:
-    # 初期値は ROWS (末尾追加＝従来の動作)
-    st.session_state.insertion_index = ROWS
 if 'custom_new_row' not in st.session_state:
-    # 新行指定用：空の場合は自動生成、入力があればそれを使う
     st.session_state.custom_new_row = None
 
 st.title("Haru Cats シミュレーション＆最適解探索 (Streamlit版)")
@@ -241,31 +275,30 @@ st.pyplot(fig_board)
 
 # 新行プレビュー描画
 st.subheader("次ターンに追加される行")
-# ここでは custom_new_row が設定されていればそちらを、なければ st.session_state.new_row を表示
 display_new_row = st.session_state.custom_new_row if st.session_state.custom_new_row is not None else st.session_state.new_row
 fig_new_row = draw_new_row(display_new_row)
 st.pyplot(fig_new_row)
 
-# 入力されたメッセージの表示
+# メッセージ表示
 st.write(st.session_state.message)
 
 # === 手動盤面入力用 UI ===
 st.subheader("手動で盤面を入力")
 manual_input = st.text_area(
-    "各行は 9 個の数値(0: EMPTY, 1: CAT, 2: CHICK, 3: COW) を空白区切りで入力し、改行で区切ってください。\n例:\n0 0 0 0 0 0 0 0 0\n1 0 2 0 3 0 0 1 0\n..."
+    "各行は 9 個の数値(0: EMPTY, 1: CAT, 2: CHICK, 3: COW,\n4: SPECIAL_HEAD_LEFT, 5: SPECIAL_BODY, 6: SPECIAL_HEAD_RIGHT) を空白区切りで入力し、改行で区切ってください。\n例:\n0 0 0 0 0 0 0 0 0\n1 0 2 0 3 0 0 1 0\n..."
 )
 if st.button("盤面更新"):
     try:
         new_board_data = parse_board_input(manual_input)
         st.session_state.board.grid = new_board_data
         st.session_state.message = "盤面を更新しました。"
-        st.experimental_rerun()  # 状態更新のため再描画
+        st.experimental_rerun()
     except Exception as e:
         st.session_state.message = f"入力エラー: {e}"
 
 # === 新行内容指定用 UI ===
 st.subheader("新行内容を指定")
-new_row_input = st.text_input("新行内容 (9個の数値を空白区切りで。例: 1 0 2 0 3 0 1 0 2)", value="")
+new_row_input = st.text_input("新行内容 (9 個の数値を空白区切りで。例: 1 0 2 0 3 0 1 0 2)", value="")
 if new_row_input.strip() != "":
     try:
         custom_row = parse_new_row_input(new_row_input)
@@ -274,7 +307,6 @@ if new_row_input.strip() != "":
     except Exception as e:
         st.session_state.message = f"新行入力エラー: {e}"
 else:
-    # 入力が空の場合は、custom_new_row をクリア（自動生成が使われる）
     st.session_state.custom_new_row = None
 
 # --- 操作用ボタン ---
@@ -310,21 +342,14 @@ if col3.button("最適解を提示"):
 
 # 次のターン（新行追加）
 if col4.button("次のターン"):
-    insertion_index = st.session_state.insertion_index
-    # 新行内容：custom_new_row が設定されていればそれを、なければ st.session_state.new_row を使う
     new_row_to_add = st.session_state.custom_new_row if st.session_state.custom_new_row is not None else st.session_state.new_row
-    cleared = simulate_turn(st.session_state.board, new_row_to_add, insertion_index)
+    cleared = simulate_turn(st.session_state.board, new_row_to_add)
     st.session_state.message = f"次のターン実行！（消去行：{cleared}）"
-    # 次のターンの新行は自動生成（custom_new_row をクリア）
     st.session_state.new_row = generate_new_row()
     st.session_state.custom_new_row = None
     if st.session_state.board.game_over():
         st.session_state.message = "ゲームオーバー！"
 
-# 行番号入力欄：操作したい行番号（0～10）
+# 操作する行番号入力
 selected_row_input = st.number_input("操作する行番号を指定（0～10）", min_value=0, max_value=ROWS-1, step=1)
 st.session_state.selected_row = int(selected_row_input)
-
-# 新行挿入位置の指定（0～ROWS）
-insertion_index_input = st.number_input("新行挿入位置を指定 (0～11)", min_value=0, max_value=ROWS, step=1, value=ROWS)
-st.session_state.insertion_index = int(insertion_index_input)
