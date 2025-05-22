@@ -54,9 +54,19 @@ class Board:
                         current_row += 1
 
     def add_new_row(self, new_row):
-        """上端の行を削除して、下端に新行を追加する."""
+        """上端の行を削除して、下端に新行を追加する。（従来の動作）"""
         self.grid.pop(0)
         self.grid.append(new_row.copy())
+        self.apply_gravity()
+
+    def insert_new_row_at(self, new_row, index):
+        """
+        指定したインデックス位置に新行を挿入する。
+        ※ 盤面サイズは固定のため、挿入後に下端がはみ出る場合は一番下の行を削除する。
+        """
+        self.grid.insert(index, new_row.copy())
+        if len(self.grid) > self.rows:
+            self.grid.pop()  # 最下行を削除
         self.apply_gravity()
 
     def clear_filled_rows(self):
@@ -93,9 +103,12 @@ def evaluate_board(board):
     """
     return board.get_empty_count()
 
-def simulate_turn(board, new_row):
-    """新行追加、重力適用、行クリアを１ターンで実行する."""
-    board.add_new_row(new_row)
+def simulate_turn(board, new_row, insertion_index):
+    """
+    新行を指定の位置に挿入し、重力適用・行クリアを行う。
+    ユーザー指定の挿入位置と、新行内容を利用する。
+    """
+    board.insert_new_row_at(new_row, insertion_index)
     cleared = board.clear_filled_rows()
     return cleared
 
@@ -110,7 +123,8 @@ def get_optimal_move(board, new_row):
         for direction in ['left', 'right']:
             temp_board = board.copy()
             temp_board.slide_row(row, direction)
-            temp_board.add_new_row(new_row)
+            # ここでは従来どおり末尾に新行を追加して評価
+            temp_board.insert_new_row_at(new_row, ROWS)
             temp_board.clear_filled_rows()
             score = evaluate_board(temp_board)
             if score > best_score:
@@ -192,6 +206,16 @@ def parse_board_input(input_str):
         board_data.append(row)
     return board_data
 
+def parse_new_row_input(input_str):
+    """
+    ユーザーが入力した新行内容（1 行の文字列）を、COLS 個の数字のリストに変換する。
+    例: "1 0 2 0 3 0 1 0 2"
+    """
+    parts = input_str.strip().split()
+    if len(parts) != COLS:
+        raise ValueError(f"新行は必ず {COLS} 個の数値でなければなりません。")
+    return [int(x) for x in parts]
+
 # --- Streamlit セッション状態の管理 ---
 if 'board' not in st.session_state:
     st.session_state.board = Board()
@@ -201,6 +225,12 @@ if 'selected_row' not in st.session_state:
     st.session_state.selected_row = None
 if 'message' not in st.session_state:
     st.session_state.message = "操作してください。"
+if 'insertion_index' not in st.session_state:
+    # 初期値は ROWS (末尾追加＝従来の動作)
+    st.session_state.insertion_index = ROWS
+if 'custom_new_row' not in st.session_state:
+    # 新行指定用：空の場合は自動生成、入力があればそれを使う
+    st.session_state.custom_new_row = None
 
 st.title("Haru Cats シミュレーション＆最適解探索 (Streamlit版)")
 
@@ -211,7 +241,9 @@ st.pyplot(fig_board)
 
 # 新行プレビュー描画
 st.subheader("次ターンに追加される行")
-fig_new_row = draw_new_row(st.session_state.new_row)
+# ここでは custom_new_row が設定されていればそちらを、なければ st.session_state.new_row を表示
+display_new_row = st.session_state.custom_new_row if st.session_state.custom_new_row is not None else st.session_state.new_row
+fig_new_row = draw_new_row(display_new_row)
 st.pyplot(fig_new_row)
 
 # 入力されたメッセージの表示
@@ -231,6 +263,20 @@ if st.button("盤面更新"):
     except Exception as e:
         st.session_state.message = f"入力エラー: {e}"
 
+# === 新行内容指定用 UI ===
+st.subheader("新行内容を指定")
+new_row_input = st.text_input("新行内容 (9個の数値を空白区切りで。例: 1 0 2 0 3 0 1 0 2)", value="")
+if new_row_input.strip() != "":
+    try:
+        custom_row = parse_new_row_input(new_row_input)
+        st.session_state.custom_new_row = custom_row
+        st.session_state.message = "新行内容を更新しました。"
+    except Exception as e:
+        st.session_state.message = f"新行入力エラー: {e}"
+else:
+    # 入力が空の場合は、custom_new_row をクリア（自動生成が使われる）
+    st.session_state.custom_new_row = None
+
 # --- 操作用ボタン ---
 col1, col2, col3, col4 = st.columns(4)
 
@@ -241,7 +287,7 @@ if col1.button("左にスライド"):
         st.session_state.board.apply_gravity()
         st.session_state.message = f"{st.session_state.selected_row} 行目を左にスライドしました。"
     else:
-        st.session_state.message = "まずは行番号（0～10）を入力してください。"
+        st.session_state.message = "まずは操作する行番号（0～10）を指定してください。"
 
 # 右にスライド
 if col2.button("右にスライド"):
@@ -250,7 +296,7 @@ if col2.button("右にスライド"):
         st.session_state.board.apply_gravity()
         st.session_state.message = f"{st.session_state.selected_row} 行目を右にスライドしました。"
     else:
-        st.session_state.message = "まずは行番号（0～10）を入力してください。"
+        st.session_state.message = "まずは操作する行番号（0～10）を指定してください。"
 
 # 最適解の提示
 if col3.button("最適解を提示"):
@@ -262,14 +308,23 @@ if col3.button("最適解を提示"):
     else:
         st.session_state.message = "有効な手が見つかりませんでした。"
 
-# 次のターン
+# 次のターン（新行追加）
 if col4.button("次のターン"):
-    cleared = simulate_turn(st.session_state.board, st.session_state.new_row)
+    insertion_index = st.session_state.insertion_index
+    # 新行内容：custom_new_row が設定されていればそれを、なければ st.session_state.new_row を使う
+    new_row_to_add = st.session_state.custom_new_row if st.session_state.custom_new_row is not None else st.session_state.new_row
+    cleared = simulate_turn(st.session_state.board, new_row_to_add, insertion_index)
     st.session_state.message = f"次のターン実行！（消去行：{cleared}）"
+    # 次のターンの新行は自動生成（custom_new_row をクリア）
     st.session_state.new_row = generate_new_row()
+    st.session_state.custom_new_row = None
     if st.session_state.board.game_over():
         st.session_state.message = "ゲームオーバー！"
 
 # 行番号入力欄：操作したい行番号（0～10）
-selected_row_input = st.number_input("行番号を指定（0～10）", min_value=0, max_value=ROWS-1, step=1)
+selected_row_input = st.number_input("操作する行番号を指定（0～10）", min_value=0, max_value=ROWS-1, step=1)
 st.session_state.selected_row = int(selected_row_input)
+
+# 新行挿入位置の指定（0～ROWS）
+insertion_index_input = st.number_input("新行挿入位置を指定 (0～11)", min_value=0, max_value=ROWS, step=1, value=ROWS)
+st.session_state.insertion_index = int(insertion_index_input)
